@@ -188,7 +188,7 @@
   <div class="row"><span class="k">摆角 θ</span><span class="v" id="o-theta">45.0°</span></div>
   <div class="row"><span class="k">角速度 ω</span><span class="v" id="o-omega">0.00</span></div>
   <div class="row"><span class="k">理论周期 T</span><span class="v" id="o-period">2.84s</span></div>
-  <div class="row"><span class="k">已摆动</span><span class="v" id="o-count">0 次</span></div>
+  <div class="row"><span class="k">完整周期</span><span class="v" id="o-count">0 个</span></div>
 </div>
 
 <div id="panel">
@@ -562,10 +562,21 @@ function loop(now) {
   render();
 }
 
-// 摆角由正变负 = 完成一个完整周期，用于统计摆动次数
-function countSwing(prev, curr) {
-  if (prev > 0 && curr <= 0) sim.swings++;
+// 周期计数：摆到达最高点时角速度 ω 过零变号。
+// 从静止释放起，每 2 次 ω 符号翻转 = 恰好 1 个完整周期，
+// 且对任意初始摆角（左/右侧释放）都精确成立，无相位偏移。
+// （注意：不能用「θ 由正变负」计数——每周期只发生一次同向过零，
+//   且第一次过零仅走了 1/4 周期，会产生 3T/4 的计数偏移。）
+let lastOmega = null;
+function countSwing(prevTheta, currTheta) {
+  if (lastOmega !== null) {
+    const flipped = (lastOmega < 0 && sim.omega >= 0) ||
+                    (lastOmega > 0 && sim.omega <= 0);
+    if (flipped) sim.swings = Math.floor(++omegaFlips / 2);
+  }
+  lastOmega = sim.omega;
 }
+let omegaFlips = 0;
 
 /* -------------------- 7. HUD 刷新 -------------------- */
 const elTheta  = document.getElementById("o-theta");
@@ -582,7 +593,7 @@ function updateHUD() {
   elTheta.textContent = (sim.theta * 180 / Math.PI).toFixed(1) + "°";
   elOmega.textContent = sim.omega.toFixed(2);
   elPeriod.textContent = theoryPeriod().toFixed(2) + "s";
-  elCount.textContent = sim.swings + " 次";
+  elCount.textContent = sim.swings + " 个";
 }
 
 /* -------------------- 8. 交互绑定 -------------------- */
@@ -601,6 +612,8 @@ function resetMotion(thetaDeg) {
   sim.omega = 0;
   sim.time  = 0;
   sim.swings = 0;
+  omegaFlips = 0;
+  lastOmega = null;
   sim.trail.length = 0;
   accumulator = 0;
   lastTime = 0;
