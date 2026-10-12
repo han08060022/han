@@ -1,0 +1,117 @@
+# ============================================================
+#  .gitignore —— 告诉 Git「哪些文件不要纳入版本管理」
+#  课程：跨学科编程基础 · 个人作品集仓库
+#  说明：以 # 开头的行是注释，写给自己看的，Git 会忽略
+# ============================================================
+
+# ---------- 1. 操作系统自动生成的垃圾文件 ----------
+# macOS 的 Finder 索引文件
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows 的资源管理器缩略图缓存
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# ---------- 2. 编辑器 / IDE 的个人配置 ----------
+# 这些是「每个人的编辑器长得不一样」的部分，不该同步给别人
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# ---------- 3. Python 相关 ----------
+# 编译缓存（每次运行自动生成，删了也没关系）
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 虚拟环境（每个人的电脑路径不同，绝对不要上传）
+venv/
+.venv/
+env/
+ENV/
+.python-version
+
+# 打包与测试产物
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook 的检查点（自动备份，冗余）
+.ipynb_checkpoints/
+
+# ---------- 4. Node.js / 前端相关 ----------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json.bak
+
+# 前端构建产物
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+
+# ---------- 5. 实验数据与输出（本课程特别注意） ----------
+# 【重要】食品科学实验常见大文件，GitHub 单文件限制 100MB
+# 原始仪器导出数据、几百 MB 的图谱/光谱文件，不要上传
+# 约定：本地保留在 data/raw/ 下，仓库只上传处理后的结果
+data/raw/
+*.csv.bak
+*.xlsx.bak
+
+# 各类中间输出、随机生成的图
+outputs/
+temp/
+tmp/
+*.tmp
+*.log
+
+# 实验仪器的专有格式（示例，可按需增删）
+*.spc
+*.jdx
+*.dx
+*.raw
+*.mzML.bak
+
+# ---------- 6. 密钥 / 隐私（绝对不能上传） ----------
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# ---------- 7. 压缩包（一般不需要版本管理） ----------
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ============================================================
+#  想临时忽略某个「已经跟踪」的文件？
+#    git rm --cached 文件名      （只从 Git 移除，本地文件保留）
+#  想查看哪条规则生效了？
+#    git check-ignore -v 文件名
+# ============================================================
