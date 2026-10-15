@@ -109,6 +109,58 @@
 
   .divider { width: 1px; height: 20px; background: rgba(120, 140, 255, .16); }
 
+  /* ---------------- 天体预设胶囊 ---------------- */
+  .presets { display: flex; align-items: center; gap: 6px; }
+
+  .pill {
+    padding: 6px 13px;
+    font-size: 11.5px;
+    font-family: inherit;
+    color: #8b93b8;
+    background: rgba(90, 105, 170, .1);
+    border: 1px solid rgba(120, 140, 255, .2);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .22s cubic-bezier(.4, 0, .2, 1);
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+
+  .pill:hover {
+    color: #c3cdf5;
+    background: rgba(111, 141, 255, .18);
+    border-color: rgba(111, 141, 255, .45);
+    transform: translateY(-1px);
+  }
+
+  .pill.active {
+    color: #fff;
+    background: linear-gradient(135deg, rgba(111,141,255,.42), rgba(170,120,255,.34));
+    border-color: rgba(150, 175, 255, .8);
+    box-shadow: 0 0 15px rgba(120, 150, 255, .42),
+                inset 0 1px 0 rgba(255,255,255,.18);
+  }
+
+  .pill:active { transform: translateY(0) scale(.96); }
+
+  /* 滑块被程序改动时的短暂高亮，提示"它被联动了" */
+  .ctrl.flash output {
+    animation: flashOut .85s ease-out;
+  }
+  @keyframes flashOut {
+    0%   { color: #fff; text-shadow: 0 0 12px rgba(140,190,255,.95); transform: scale(1.22); }
+    60%  { color: #a8c8ff; text-shadow: 0 0 7px rgba(140,190,255,.5); transform: scale(1.04); }
+    100% { color: #8fa8ff; text-shadow: none; transform: scale(1); }
+  }
+
+  .ctrl.flash input[type=range]::-webkit-slider-thumb {
+    animation: flashThumb .85s ease-out;
+  }
+  @keyframes flashThumb {
+    0%   { box-shadow: 0 0 22px rgba(150,200,255,1); transform: scale(1.35); }
+    100% { box-shadow: 0 0 9px rgba(111,141,255,.8); transform: scale(1); }
+  }
+
   /* ---------------- 右下角署名 ---------------- */
   #credit {
     position: fixed; right: 18px; bottom: 20px;
@@ -134,6 +186,7 @@
     #hud { font-size: 11px; padding: 10px 12px; min-width: 0; }
     #panel { gap: 10px; padding: 10px 13px; }
     input[type=range] { width: 64px; }
+    .pill { padding: 5px 9px; font-size: 11px; }
     #credit { display: none; }
     #hint { display: none; }
   }
@@ -162,6 +215,17 @@
 </div>
 
 <div id="panel">
+
+  <!-- ===== 天体预设胶囊 ===== -->
+  <div class="presets" id="presets">
+    <button class="pill" data-preset="earth" title="地球 g=9.8">🌍 地球</button>
+    <button class="pill" data-preset="moon"  title="月球 g=1.6">🌙 月球</button>
+    <button class="pill" data-preset="jupiter" title="木星 g=24.8">🪐 木星</button>
+    <button class="pill" data-preset="space" title="太空 g≈0.5">🚀 太空</button>
+  </div>
+
+  <div class="divider"></div>
+
   <div class="ctrl">
     <label>杆1 L₁</label>
     <input type="range" id="in-l1" min="60" max="150" step="1" value="110">
@@ -179,18 +243,18 @@
   </div>
   <div class="ctrl">
     <label>重力 g</label>
-    <input type="range" id="in-g" min="1" max="25" step="0.1" value="9.8">
+    <input type="range" id="in-g" min="0.5" max="25" step="0.1" value="9.8">
     <output id="o-g">9.8</output>
   </div>
   <div class="ctrl">
     <label>阻尼</label>
-    <input type="range" id="in-damp" min="0" max="0.010" step="0.0005" value="0">
+    <input type="range" id="in-damp" min="0" max="0.010" step="0.0001" value="0">
     <output id="o-damp">0.000</output>
   </div>
   <div class="ctrl">
     <label>拖尾</label>
     <input type="range" id="in-trail" min="60" max="900" step="20" value="420">
-    <output id="o-trail">420</output>
+    <output id="o-trail-len">420</output>
   </div>
 
   <div class="divider"></div>
@@ -671,6 +735,8 @@ function loop(now) {
 
     let guard = 0;
     while (accumulator >= FIXED_DT && guard < 900) {
+      // 重力平滑过渡：在每个物理步前推进一次，保证过渡与物理同步
+      approachGravity(FIXED_DT);
       rk4Step(FIXED_DT);
       accumulator -= FIXED_DT;
       guard++;
@@ -682,6 +748,9 @@ function loop(now) {
     while (sim.trail.length > sim.trailMax) sim.trail.shift();
 
     updateHUD();
+  } else {
+    // 暂停时也要完成重力过渡，否则暂停中切场景会"冻住"过渡
+    approachGravity(frameTime);
   }
 
   render();
@@ -759,7 +828,7 @@ const oL2    = document.getElementById("o-l2");
 const oMass  = document.getElementById("o-mass");
 const oG     = document.getElementById("o-g");
 const oDamp  = document.getElementById("o-damp");
-const oTrail = document.getElementById("o-trail");
+const oTrail = document.getElementById("o-trail-len");
 const btnReset = document.getElementById("btn-reset");
 const btnPause = document.getElementById("btn-pause");
 const btnTrailClear = document.getElementById("btn-trailclear");
@@ -958,21 +1027,308 @@ window.resetMotion      = resetMotion;
 window.resetAnimation   = handleResetClick;   // 向后兼容别名
 window.__pendulumReset  = handleResetClick;
 
-/* -------------------- 13. 启动 -------------------- */
-oL1.textContent   = sim.L1;
-oL2.textContent   = sim.L2;
-oMass.textContent = (sim.m2 / sim.m1).toFixed(1);
-oG.textContent    = sim.g.toFixed(1);
-oDamp.textContent = sim.dampRead.toFixed(3);
-oTrail.textContent= sim.trailMax;
+/* ================================================================
+   14. 天体预设场景
+   ----------------------------------------------------------------
+   4 个预设：地球 / 月球 / 木星 / 太空
+   每个预设只定义重力 g（及可选阻尼），其余参数不被覆盖——
+   这样"切场景"是纯粹的物理环境切换，用户自己的杆长/质量比设置不会丢。
 
-resetMotion(ANG_RESET_1, ANG_RESET_2);
-requestAnimationFrame(loop);
+   切换时对 g 做【平滑过渡】（指数缓动），而不是瞬间跳变：
+   渲染层每帧把 sim.g 向目标值逼近，视觉上重力"渐变"，
+   摆的运动也自然改变节奏，而不是突兀地抖一下。
+   ================================================================ */
+const PRESETS = {
+  earth:   { g: 9.8,   damp: 0,     label: "地球"  },
+  moon:    { g: 1.62,  damp: 0,     label: "月球"  },
+  jupiter: { g: 24.79, damp: 0,     label: "木星"  },
+  space:   { g: 0.5,   damp: 0.0006,label: "太空"  }
+};
+
+// 重力滑块范围（太空预设的 0.5 需要滑块下探到 0.5）
+const G_SLIDER_MIN = 0.5, G_SLIDER_MAX = 25;
+
+let activePreset = "earth";
+
+// 平滑过渡状态：gTarget 是目标值，sim.g 每帧向它逼近
+let gTarget = sim.g;
+
+/**
+ * 指数缓动的帧推进：把 sim.g 向 gTarget 靠拢。
+ * 用 dt 参与计算，保证不同帧率下过渡时长一致（约 0.55 秒到位）。
+ */
+function approachGravity(dt) {
+  const diff = gTarget - sim.g;
+  if (Math.abs(diff) < 1e-4) {
+    if (sim.g !== gTarget) {
+      sim.g = gTarget;
+      sim.E0 = totalEnergy();     // 过渡结束后重设能量基准
+      updateHUD();
+    }
+    return;
+  }
+  // 指数逼近：每帧消掉固定比例，k 越大越快
+  const k = 1 - Math.exp(-dt * 7.5);
+  sim.g += diff * k;
+
+  // 过渡过程中持续刷新 UI（滑块实时移动，形成"联动"的观感）
+  inG.value = sim.g.toFixed(1);
+  oG.textContent = sim.g.toFixed(1);
+  sim.E0 = totalEnergy();
+  updateHUD();
+}
+
+/** 切换天体预设 */
+function applyPreset(key) {
+  const p = PRESETS[key];
+  if (!p) return;
+
+  activePreset = key;
+  gTarget = p.g;
+
+  // 重力滑块范围可能不够覆盖最小重力，动态放宽
+  inG.min = (p.g < G_SLIDER_MIN) ? p.g : G_SLIDER_MIN;
+
+  // 阻尼随预设走（太空有微小阻尼，其余为 0）
+  inDamp.value = p.damp;
+  sim.dampRead = p.damp;
+  oDamp.textContent = p.damp.toFixed(3);
+  syncDamping();
+
+  // 胶囊高亮
+  document.querySelectorAll(".pill").forEach(function (el) {
+    el.classList.toggle("active", el.dataset.preset === key);
+  });
+
+  // 滑块高亮提示：切换场景时把"被联动的滑块"闪一下，让用户看到改动落在哪
+  flashCtrl(inG);
+  if (p.damp !== 0) flashCtrl(inDamp);
+
+  updateHUD();
+  saveState();
+}
+
+/** 给某个 .ctrl 添加一次性高亮动画 */
+function flashCtrl(inputEl) {
+  const ctrl = inputEl.closest(".ctrl");
+  if (!ctrl) return;
+  ctrl.classList.remove("flash");
+  void ctrl.offsetWidth;          // 强制重排以重启动画
+  ctrl.classList.add("flash");
+  setTimeout(function () { ctrl.classList.remove("flash"); }, 900);
+}
+
+// 胶囊点击绑定
+document.querySelectorAll(".pill").forEach(function (el) {
+  el.addEventListener("click", function () {
+    applyPreset(el.dataset.preset);
+  });
+});
+
+/* ================================================================
+   15. localStorage 数据持久化
+   ----------------------------------------------------------------
+   保存内容：所有用户可调参数 + 当前天体预设。
+   不保存瞬态（角度、速度、时间）——刷新后从初始角重新摆，
+   这符合"恢复上次参数"的语义，也避免把中途状态固化。
+
+   容错：解析失败 / 越界值 / localStorage 不可用（隐私模式）全部静默降级，
+   保证任何情况下页面都能正常启动。
+   ================================================================ */
+const STORAGE_KEY = "ncu.pendulum.double.v1";
+
+function saveState() {
+  try {
+    const data = {
+      v: 1,
+      L1: sim.L1,
+      L2: sim.L2,
+      massRatio: +(sim.m2 / sim.m1).toFixed(2),
+      g: +sim.g.toFixed(2),
+      gTarget: +gTarget.toFixed(2),
+      damp: sim.dampRead,
+      trail: sim.trailMax,
+      preset: activePreset,
+      savedAt: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    return true;
+  } catch (err) {
+    return false;    // 隐私模式/配额满：静默失败
+  }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== "object") return null;
+
+    // 逐项做范围校验，任何非法值都回退到默认（防止手改 localStorage 搞崩页面）
+    const clamp = (v, lo, hi, def) => {
+      const n = Number(v);
+      return (isFinite(n) && n >= lo && n <= hi) ? n : def;
+    };
+
+    return {
+      L1:      clamp(d.L1, L_MIN, L_MAX, 110),
+      L2:      clamp(d.L2, L_MIN, L_MAX, 110),
+      massRatio: clamp(d.massRatio, 0.2, 3, 1),
+      g:       clamp(d.g, 0.1, 100, 9.8),
+      gTarget: clamp(d.gTarget, 0.1, 100, null),
+      damp:    clamp(d.damp, 0, 0.010, 0),
+      trail:   clamp(d.trail, 60, 900, 420),
+      // 预设标识：允许 "custom"（用户手动改过参数）与非法值兜底为 null。
+      // 注意不能用 PRESETS[d.preset] 直接判真——"custom" 不在 PRESETS 里，
+      // 会被误判成"无预设"，进而按 g 反推最近预设，出现"自定义参数却高亮某天体"的错标。
+      preset:  (d.preset === "custom")
+                 ? "custom"
+                 : ((d.preset && PRESETS[d.preset]) ? d.preset : null)
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+function clearState() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch (err) {}
+}
+
+/* 参数变化时保存（防抖 220ms，避免拖动滑块时疯狂写盘） */
+let saveTimer = null;
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(function () {
+    saveTimer = null;
+    saveState();
+  }, 220);
+}
+
+/* ================================================================
+   16. 启动
+   ================================================================ */
+
+/**
+ * 应用一份已校验的参数到界面与物理状态。
+ * @param {object} s  来自 loadState 的对象
+ * @param {boolean} silent  是否抑制高亮动画（开机恢复时不闪）
+ */
+function applyLoadedState(s, silent) {
+  sim.L1 = s.L1;
+  sim.L2 = s.L2;
+  sim.m2 = sim.m1 * s.massRatio;
+  sim.g  = s.g;
+  gTarget = (s.gTarget !== null && s.gTarget !== undefined) ? s.gTarget : s.g;
+  sim.dampRead = s.damp;
+  sim.trailMax = s.trail;
+
+  // 同步到滑块控件
+  inL1.value = s.L1;      oL1.textContent = s.L1;
+  inL2.value = s.L2;      oL2.textContent = s.L2;
+  inMass.value = s.massRatio; oMass.textContent = s.massRatio.toFixed(1);
+  inG.value = sim.g.toFixed(1); oG.textContent = sim.g.toFixed(1);
+  inDamp.value = s.damp;  oDamp.textContent = s.damp.toFixed(3);
+  inTrail.value = s.trail; oTrail.textContent = s.trail;
+
+  // 重力滑块范围适配
+  inG.min = (gTarget < G_SLIDER_MIN) ? gTarget : G_SLIDER_MIN;
+
+  syncDamping();
+
+  // 恢复预设高亮
+  if (s.preset === "custom") {
+    // 用户上次手动调过参数 → 不点亮任何天体胶囊
+    activePreset = "custom";
+    document.querySelectorAll(".pill").forEach(function (el) {
+      el.classList.remove("active");
+    });
+  } else if (s.preset) {
+    activePreset = s.preset;
+    document.querySelectorAll(".pill").forEach(function (el) {
+      el.classList.toggle("active", el.dataset.preset === s.preset);
+    });
+  } else {
+    // 无预设记录：按 g 值反推最接近的预设作为高亮
+    let best = null, bestD = Infinity;
+    for (const k in PRESETS) {
+      const d = Math.abs(PRESETS[k].g - sim.g);
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    activePreset = best;
+    document.querySelectorAll(".pill").forEach(function (el) {
+      el.classList.toggle("active", el.dataset.preset === best);
+    });
+  }
+
+  if (!silent) {
+    flashCtrl(inG);
+    flashCtrl(inDamp);
+  }
+}
+
+// —— 开机流程：先尝试读缓存，读不到就用默认值 ——
+(function boot() {
+  const saved = loadState();
+
+  if (saved) {
+    applyLoadedState(saved, true);      // 静默恢复，不闪高亮
+    console.log("[双摆] 已从本地缓存恢复参数（预设：" + (saved.preset || "自定义") + "）");
+  } else {
+    // 无缓存：使用默认值，并把地球设为激活预设
+    oL1.textContent   = sim.L1;
+    oL2.textContent   = sim.L2;
+    oMass.textContent = (sim.m2 / sim.m1).toFixed(1);
+    oG.textContent    = sim.g.toFixed(1);
+    oDamp.textContent = sim.dampRead.toFixed(3);
+    oTrail.textContent= sim.trailMax;
+    activePreset = "earth";
+    gTarget = PRESETS.earth.g;
+    document.querySelectorAll(".pill").forEach(function (el) {
+      el.classList.toggle("active", el.dataset.preset === "earth");
+    });
+  }
+
+  resetMotion(ANG_RESET_1, ANG_RESET_2);
+  requestAnimationFrame(loop);
+})();
+
+/* 滑块输入时也触发保存 */
+[inL1, inL2, inMass, inG, inDamp, inTrail].forEach(function (el) {
+  el.addEventListener("input", scheduleSave);
+});
+
+// 手动改重力滑块 → 视为离开预设，取消胶囊高亮（但保留阻尼设置）
+inG.addEventListener("input", function () {
+  gTarget = Number(this.value);        // 手动拖 g 时目标值同步跟随，不产生回拉
+  let matched = null;
+  for (const k in PRESETS) {
+    if (Math.abs(PRESETS[k].g - sim.g) < 0.15) { matched = k; break; }
+  }
+  activePreset = matched || "custom";
+  document.querySelectorAll(".pill").forEach(function (el) {
+    el.classList.toggle("active", el.dataset.preset === matched);
+  });
+  scheduleSave();
+});
+
+// 供控制台/测试使用
+window.__dpPresets = {
+  apply: applyPreset,
+  save: saveState,
+  load: loadState,
+  clear: clearState,
+  get active() { return activePreset; },
+  get gTarget() { return gTarget; },
+  PRESETS: PRESETS,
+  STORAGE_KEY: STORAGE_KEY
+};
 
 // 调试入口
 window.__doublePendulum = sim;
 window.__dp = { sim: sim, geomScale: geomScale, pivot: pivot, bob1Pos: bob1Pos,
-                bob2Pos: bob2Pos, totalEnergy: totalEnergy, rk4Step: rk4Step };
+                bob2Pos: bob2Pos, totalEnergy: totalEnergy, rk4Step: rk4Step,
+                approachGravity: approachGravity };
 </script>
 
 </body>
