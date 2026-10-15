@@ -67,8 +67,9 @@
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 22px;
-    padding: 14px 26px;
+    gap: 14px;
+    row-gap: 10px;
+    padding: 13px 20px;
     border-radius: 999px;
     background: rgba(26, 26, 36, .78);
     border: 1px solid rgba(120, 140, 255, .18);
@@ -76,10 +77,10 @@
     user-select: none;
     flex-wrap: wrap;
     justify-content: center;
-    max-width: calc(100vw - 40px);
+    max-width: calc(100vw - 32px);
   }
 
-  .ctrl { display: flex; align-items: center; gap: 9px; }
+  .ctrl { display: flex; align-items: center; gap: 7px; }
 
   .ctrl label {
     font-size: 12px;
@@ -92,14 +93,14 @@
     color: #8fa8ff;
     font-variant-numeric: tabular-nums;
     font-family: "SF Mono", Consolas, Monaco, monospace;
-    min-width: 46px;
+    min-width: 44px;
     text-align: right;
   }
 
   input[type=range] {
     -webkit-appearance: none;
     appearance: none;
-    width: 108px;
+    width: 88px;
     height: 3px;
     border-radius: 2px;
     background: rgba(120, 140, 255, .22);
@@ -132,7 +133,7 @@
   }
 
   button {
-    padding: 7px 17px;
+    padding: 7px 15px;
     font-size: 12px;
     font-family: inherit;
     color: #dfe4ff;
@@ -141,6 +142,7 @@
     border-radius: 999px;
     cursor: pointer;
     transition: all .18s;
+    white-space: nowrap;
   }
 
   button:hover {
@@ -171,10 +173,10 @@
     line-height: 1.7;
   }
 
-  @media (max-width: 720px) {
+  @media (max-width: 900px) {
     #hud { font-size: 11px; padding: 10px 13px; }
-    #panel { gap: 13px; padding: 11px 16px; }
-    input[type=range] { width: 76px; }
+    #panel { gap: 12px; padding: 11px 16px; }
+    input[type=range] { width: 72px; }
     #credit { display: none; }
   }
 </style>
@@ -189,12 +191,13 @@
   <div class="row"><span class="k">角速度 ω</span><span class="v" id="o-omega">0.00</span></div>
   <div class="row"><span class="k">理论周期 T</span><span class="v" id="o-period">2.84s</span></div>
   <div class="row"><span class="k">完整周期</span><span class="v" id="o-count">0 个</span></div>
+  <div class="row"><span class="k">阻尼模式</span><span class="v" id="o-mode">无阻尼</span></div>
 </div>
 
 <div id="panel">
   <div class="ctrl">
     <label>摆长 L</label>
-    <input type="range" id="in-len" min="60" max="330" step="1" value="200">
+    <input type="range" id="in-len" min="100" max="350" step="1" value="200">
     <output id="o-len">200</output>
   </div>
 
@@ -205,6 +208,12 @@
   </div>
 
   <div class="ctrl">
+    <label>阻尼 b</label>
+    <input type="range" id="in-damp" min="0" max="0.010" step="0.0005" value="0">
+    <output id="o-damp">0.000</output>
+  </div>
+
+  <div class="ctrl">
     <label>初摆角</label>
     <input type="range" id="in-ang" min="3" max="170" step="1" value="45">
     <output id="o-ang">45°</output>
@@ -212,7 +221,7 @@
 
   <div class="divider"></div>
 
-  <button id="btn-reset">重新释放</button>
+  <button id="btn-reset">重置摆动</button>
   <button id="btn-pause">暂停</button>
 </div>
 
@@ -255,34 +264,57 @@ const G_DEFAULT   = 9.8;
 const L_DEFAULT   = 200;      // 像素
 const ANG_DEFAULT = 45;       // 度
 
-// 约束范围
-const L_MIN = 60,  L_MAX = 330;
+// 约束范围（与 HTML 滑块的 min/max 保持一致）
+const L_MIN = 100, L_MAX = 350;
 const G_MIN = 1,   G_MAX = 25;
+const D_MIN = 0.0, D_MAX = 0.010;
 const ANG_MIN = 3, ANG_MAX = 170;
 
 // 把像素摆长换算成"米"，让 g 的数值有物理意义：
 // 视 100px = 1m，则周期公式 T = 2π√(L_m/g) 可直接套用
 const PX_PER_METER = 100;
 
+// 阻尼标定系数：滑杆读数（0~0.010）乘以该系数得到实际物理阻尼 b_eff。
+// 取 12 的目的是——滑到最右端时，约 4 个周期内振幅衰减近一半，
+// 肉眼能清楚看到"越来越小、最后停下"的自然阻尼过程。
+// （若直接用滑杆原值，衰减会慢到几乎看不出来。）
+const DAMPING_GAIN = 12;
+
 const sim = {
   Lpx:   L_DEFAULT,               // 摆长（像素）
   g:     G_DEFAULT,               // 重力加速度
+  dampRead: 0.0,                  // 阻尼滑杆读数（0 ~ 0.010）
+  damping: 0.0,                   // 实际物理阻尼 b_eff = dampRead × DAMPING_GAIN
   theta0: ANG_DEFAULT * Math.PI / 180,  // 初始摆角（弧度）
   theta: ANG_DEFAULT * Math.PI / 180,   // 当前摆角（弧度）
   omega: 0,                       // 角速度 (rad/s)
   time:  0,                       // 累计时间
   swings: 0,                      // 完成周期数
-  lastSign: 1,                    // 上一帧摆角符号，用于计次
   paused: false,
   // 视觉用：轨迹残影
   trail: []
 };
 
 /* -------------------- 3. RK4 数值积分 -------------------- */
-// 单摆方程（非线性，不做小角度近似，大角度下的真实行为才能体现）
-function accel(theta, Lpx, g) {
+/**
+ * 角加速度：含阻尼项
+ *
+ *   d²θ/dt² = -(g/L)·sin(θ) - b·ω
+ *
+ * 第一项是重力回复力（非线性，不做小角度近似）；
+ * 第二项是阻尼力矩，与角速度成正比、方向相反——
+ * 这就是真实空气阻力/轴承摩擦的简化模型，
+ * b 越大衰减越快，b=0 时能量守恒、永不停止。
+ *
+ * @param theta 当前摆角（弧度）
+ * @param omega 当前角速度（rad/s）
+ * @param Lpx   摆长（像素，内部换算为米）
+ * @param g     重力加速度
+ * @param b     阻尼系数
+ */
+function accel(theta, omega, Lpx, g, b) {
   const Lm = Lpx / PX_PER_METER;   // 像素 → 米
-  return -(g / Lm) * Math.sin(theta);
+  return -(g / Lm) * Math.sin(theta) - b * omega;
 }
 
 /**
@@ -291,17 +323,23 @@ function accel(theta, Lpx, g) {
  * 长时间摆动不会"越摆越高"或"越摆越低"。
  */
 function integrate(dt) {
-  const { Lpx, g } = sim;
+  const { Lpx, g, damping: b } = sim;
   const t = sim.theta, w = sim.omega;
 
-  const k1t = w,                          k1w = accel(t, Lpx, g);
-  const k2t = w + 0.5 * dt * k1w,         k2w = accel(t + 0.5 * dt * k1t, Lpx, g);
-  const k3t = w + 0.5 * dt * k2w,         k3w = accel(t + 0.5 * dt * k2t, Lpx, g);
-  const k4t = w + dt * k3w,               k4w = accel(t + dt * k3t,       Lpx, g);
+  const k1t = w,                          k1w = accel(t, w, Lpx, g, b);
+  const k2t = w + 0.5 * dt * k1w,         k2w = accel(t + 0.5 * dt * k1t, w + 0.5 * dt * k1w, Lpx, g, b);
+  const k3t = w + 0.5 * dt * k2w,         k3w = accel(t + 0.5 * dt * k2t, w + 0.5 * dt * k2w, Lpx, g, b);
+  const k4t = w + dt * k3w,               k4w = accel(t + dt * k3t,       w + dt * k3w,       Lpx, g, b);
 
+  // 阻尼下摆球最终会趋近静止，加上死区判定避免浮点抖动导致"永不停"
   sim.theta += (dt / 6) * (k1t + 2 * k2t + 2 * k3t + k4t);
   sim.omega += (dt / 6) * (k1w + 2 * k2w + 2 * k3w + k4w);
   sim.time  += dt;
+
+  if (b > 0 && Math.abs(sim.omega) < 1e-6 && Math.abs(sim.theta) < 1e-6) {
+    sim.omega = 0;
+    sim.theta = 0;
+  }
 }
 
 /* -------------------- 4. 几何计算 -------------------- */
@@ -466,10 +504,14 @@ function drawPendulum() {
   /* ---- 摆球（多层发光） ---- */
   const R = 17;
   // 摆动越快，辉光越强——把动能可视化为亮度
+  // 有阻尼时振幅不断减小，辉光也随之自然变暗，让"能量耗散"看得见
   const energy = Math.min(1, Math.abs(sim.omega) / 6);
-  const glow = 22 + energy * 30;
+  const ampFactor = Math.min(1, Math.abs(sim.theta) / (ANG_DEFAULT * Math.PI / 180));
+  const glow = 14 + energy * 30 + ampFactor * 8;
+  const bright = 0.45 + 0.55 * Math.max(energy, ampFactor * 0.7);
 
   ctx.save();
+  ctx.globalAlpha = bright;                 // 阻尼衰减时整体变暗
   ctx.shadowColor = "rgba(96,170,255,0.95)";
   ctx.shadowBlur = glow;
 
@@ -583,6 +625,7 @@ const elTheta  = document.getElementById("o-theta");
 const elOmega  = document.getElementById("o-omega");
 const elPeriod = document.getElementById("o-period");
 const elCount  = document.getElementById("o-count");
+const elMode   = document.getElementById("o-mode");
 
 function theoryPeriod() {
   const Lm = sim.Lpx / PX_PER_METER;
@@ -594,18 +637,44 @@ function updateHUD() {
   elOmega.textContent = sim.omega.toFixed(2);
   elPeriod.textContent = theoryPeriod().toFixed(2) + "s";
   elCount.textContent = sim.swings + " 个";
+
+  // 阻尼状态提示（按滑杆读数分级）
+  const dr = sim.dampRead;
+  if (dr === 0) {
+    elMode.textContent = "无阻尼";
+    elMode.style.color = "#8fa8ff";
+  } else if (dr < 0.003) {
+    elMode.textContent = "弱阻尼";
+    elMode.style.color = "#6fd0b0";
+  } else if (dr < 0.007) {
+    elMode.textContent = "中阻尼";
+    elMode.style.color = "#e8c26a";
+  } else {
+    elMode.textContent = "强阻尼";
+    elMode.style.color = "#e88a6a";
+  }
 }
 
 /* -------------------- 8. 交互绑定 -------------------- */
-const inLen = document.getElementById("in-len");
-const inG   = document.getElementById("in-g");
-const inAng = document.getElementById("in-ang");
-const oLen  = document.getElementById("o-len");
-const oG    = document.getElementById("o-g");
-const oAng  = document.getElementById("o-ang");
+const inLen  = document.getElementById("in-len");
+const inG    = document.getElementById("in-g");
+const inDamp = document.getElementById("in-damp");
+const inAng  = document.getElementById("in-ang");
+const oLen   = document.getElementById("o-len");
+const oG     = document.getElementById("o-g");
+const oDamp  = document.getElementById("o-damp");
+const oAng   = document.getElementById("o-ang");
 const btnReset = document.getElementById("btn-reset");
 const btnPause = document.getElementById("btn-pause");
 
+/**
+ * 复位到初始状态。
+ * @param {number} [thetaDeg] 指定初始摆角；省略则沿用「初摆角」滑块的值。
+ *
+ * 复位是"精准"的：摆角精确设为初始值、角速度清零、
+ * 周期计数器与轨迹残影一并归零，且清空时间累积器，
+ * 确保下一次物理推进从干净状态开始（不会残留旧帧的时间）。
+ */
 function resetMotion(thetaDeg) {
   const deg = (thetaDeg !== undefined) ? thetaDeg : Number(inAng.value);
   sim.theta = deg * Math.PI / 180;
@@ -620,29 +689,42 @@ function resetMotion(thetaDeg) {
   updateHUD();
 }
 
+// --- 摆长：拖动即时生效，无需复位（改变的是几何，当前状态平滑过渡） ---
 inLen.addEventListener("input", function () {
   sim.Lpx = Number(this.value);
   oLen.textContent = sim.Lpx;
   updateHUD();
 });
 
+// --- 重力：拖动即时生效，摆球当前的速度与位置都保留，物理响应连续 ---
 inG.addEventListener("input", function () {
   sim.g = Number(this.value);
   oG.textContent = sim.g.toFixed(1);
   updateHUD();
 });
 
+// --- 阻尼：拖动即时生效，从当前状态开始自然衰减 ---
+inDamp.addEventListener("input", function () {
+  sim.dampRead = Number(this.value);
+  sim.damping  = sim.dampRead * DAMPING_GAIN;   // 换算成物理阻尼
+  oDamp.textContent = sim.dampRead.toFixed(3);
+  updateHUD();
+});
+
+// --- 初摆角：拖动只更新标签，松手才复位释放 ---
 inAng.addEventListener("input", function () {
   oAng.textContent = this.value + "°";
 });
 
-// 松开滑块才重新释放，拖拽过程中不打断当前动画
 inAng.addEventListener("change", function () {
   resetMotion(Number(this.value));
 });
 
+// --- 重置摆动：精确回到初始状态（默认 45°） ---
 btnReset.addEventListener("click", function () {
-  resetMotion();
+  resetMotion(ANG_DEFAULT);      // 严格回到 45° 初始状态
+  inAng.value = ANG_DEFAULT;
+  oAng.textContent = ANG_DEFAULT + "°";
   sim.paused = false;
   btnPause.textContent = "暂停";
 });
@@ -677,6 +759,11 @@ canvas.addEventListener("click", function (e) {
 });
 
 /* -------------------- 9. 启动 -------------------- */
+// 同步 UI 与物理状态：滑块初值与 sim 保持一致
+oLen.textContent  = sim.Lpx;
+oG.textContent    = sim.g.toFixed(1);
+oDamp.textContent = sim.dampRead.toFixed(3);
+
 resetMotion(ANG_DEFAULT);
 requestAnimationFrame(loop);
 
