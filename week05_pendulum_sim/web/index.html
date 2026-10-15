@@ -689,6 +689,28 @@ function resetMotion(thetaDeg) {
   updateHUD();
 }
 
+/**
+ * 重置按钮的处理器：精确回到 45° 初始状态，并同步 UI。
+ *
+ * 【作用域说明｜重要】
+ * 本函数与 resetMotion 原先只存在于 <script> 的脚本作用域，
+ * 只能被 addEventListener 的闭包引用。若将来有人把按钮改写成
+ *   <button onclick="resetXxx()">
+ * 这类内联写法，函数名会在「全局作用域」查找，脚本作用域里的函数
+ * 找不到，就会抛出：
+ *   Uncaught ReferenceError: resetXxx is not defined
+ *     at HTMLButtonElement.onclick
+ * 为消除这一隐患，下面把处理器显式挂到 window 上（见"全局挂载"一节），
+ * 使内联绑定与 addEventListener 两种写法都能正常工作。
+ */
+function handleResetClick() {
+  resetMotion(ANG_DEFAULT);      // 严格回到 45° 初始状态
+  inAng.value = ANG_DEFAULT;
+  oAng.textContent = ANG_DEFAULT + "°";
+  sim.paused = false;
+  btnPause.textContent = "暂停";
+}
+
 // --- 摆长：拖动即时生效，无需复位（改变的是几何，当前状态平滑过渡） ---
 inLen.addEventListener("input", function () {
   sim.Lpx = Number(this.value);
@@ -721,13 +743,7 @@ inAng.addEventListener("change", function () {
 });
 
 // --- 重置摆动：精确回到初始状态（默认 45°） ---
-btnReset.addEventListener("click", function () {
-  resetMotion(ANG_DEFAULT);      // 严格回到 45° 初始状态
-  inAng.value = ANG_DEFAULT;
-  oAng.textContent = ANG_DEFAULT + "°";
-  sim.paused = false;
-  btnPause.textContent = "暂停";
-});
+btnReset.addEventListener("click", handleResetClick);
 
 btnPause.addEventListener("click", function () {
   sim.paused = !sim.paused;
@@ -758,7 +774,25 @@ canvas.addEventListener("click", function (e) {
   resetMotion(deg);
 });
 
-/* -------------------- 9. 启动 -------------------- */
+/* -------------------- 9. 全局挂载（作用域兜底） --------------------
+ *
+ * 背景：脚本用 IIFE 包裹时，函数对外部（如内联 onclick）不可见；
+ * 本项目虽未包裹 IIFE，但为彻底消除「函数作用域 ≠ 事件绑定作用域」
+ * 这类 ReferenceError 隐患，这里把关键处理器显式挂到 window。
+ *
+ * 这样以下两种写法都能正常工作、且行为一致：
+ *   A) btnReset.addEventListener("click", handleResetClick)   ← 当前用法
+ *   B) <button onclick="handleResetClick()">                   ← 内联写法
+ *
+ * 同时为历史遗留的旧函数名 resetAnimation 提供别名，避免旧页面/旧缓存
+ * 引用它时再次报错（自愈兼容）。
+ */
+window.handleResetClick = handleResetClick;
+window.resetMotion      = resetMotion;
+window.resetAnimation   = handleResetClick;   // 向后兼容别名
+window.__pendulumReset  = handleResetClick;   // 控制台手工调试用
+
+/* -------------------- 10. 启动 -------------------- */
 // 同步 UI 与物理状态：滑块初值与 sim 保持一致
 oLen.textContent  = sim.Lpx;
 oG.textContent    = sim.g.toFixed(1);
